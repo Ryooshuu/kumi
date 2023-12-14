@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using Kumi.Game.Charts;
+using Kumi.Game.Database;
 using Kumi.Game.Input;
 using Kumi.Game.Overlays;
 using Kumi.Game.Screens.Play;
@@ -25,10 +26,13 @@ public partial class SelectScreen : ScreenWithChartBackground, IKeyBindingHandle
     [Resolved]
     private IBindable<WorkingChart> chart { get; set; } = null!;
     
+    private HalfOffsetContainer? bottomOffsetContainer;
     private ListSelect listSelect = null!;
+    
+    private IDisposable? realmSubscription;
 
     [BackgroundDependencyLoader]
-    private void load(Bindable<WorkingChart> workingChart, ChartManager manager)
+    private void load(Bindable<WorkingChart> workingChart, ChartManager manager, RealmAccess realm)
     {
         InternalChildren = new Drawable[]
         {
@@ -59,7 +63,7 @@ public partial class SelectScreen : ScreenWithChartBackground, IKeyBindingHandle
                                     Padding = new MarginPadding { Left = 32 },
                                     Children = new Drawable[]
                                     {
-                                        new HalfScrollContainer(this) { RelativeSizeAxes = Axes.X },
+                                        new HalfOffsetContainer(this) { RelativeSizeAxes = Axes.X },
                                     }
                                 },
                             }
@@ -104,11 +108,32 @@ public partial class SelectScreen : ScreenWithChartBackground, IKeyBindingHandle
 
         Schedule(() =>
         {
+            realmSubscription = realm.Subscribe<ChartSetInfo>(r => r.All<ChartSetInfo>().Where(c => !c.DeletePending), (sender, changes) =>
+            {
+                if (changes == null)
+                    return;
+            
+                foreach (var i in changes.DeletedIndices)
+                    listSelect.RemoveChartSetAt(sender[i].ID);
+            
+                if (changes.InsertedIndices.Any())
+                    bottomOffsetContainer?.Expire();
+            
+                foreach (var i in changes.InsertedIndices)
+                    listSelect.AddChartSet(sender[i].Detach());
+            
+                if (changes.InsertedIndices.Any())
+                {
+                    bottomOffsetContainer = new HalfOffsetContainer(this) { RelativeSizeAxes = Axes.X };
+                    listSelect.Add(bottomOffsetContainer);
+                }
+            });
+            
             foreach (var set in charts)
                 listSelect.AddChartSet(set);
             
             // TODO: Ideally, this should always be the last child no matter what.
-            listSelect.Add(new HalfScrollContainer(this) { RelativeSizeAxes = Axes.X });
+            listSelect.Add(bottomOffsetContainer = new HalfOffsetContainer(this) { RelativeSizeAxes = Axes.X });
         });
     }
 
@@ -186,12 +211,19 @@ public partial class SelectScreen : ScreenWithChartBackground, IKeyBindingHandle
         workingChart.PrepareTrackForPreview(true);
         musicController.Play(true);
     }
-    
-    private partial class HalfScrollContainer : CompositeDrawable
+
+    protected override void Dispose(bool isDisposing)
+    {
+        base.Dispose(isDisposing);
+        
+        realmSubscription?.Dispose();
+    }
+
+    private partial class HalfOffsetContainer : CompositeDrawable
     {
         private readonly Drawable source;
 
-        public HalfScrollContainer(Drawable source)
+        public HalfOffsetContainer(Drawable source)
         {
             this.source = source;
         }

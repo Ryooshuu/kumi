@@ -30,7 +30,16 @@ public class RealmAccess : IDisposable
             if (!ThreadSafety.IsUpdateThread)
                 throw new InvalidOperationException("Realm can only be accessed from the update thread.");
 
-            return updateRealm ??= getInstance();
+            if (updateRealm == null)
+            {
+                updateRealm = getInstance();
+                
+                // Apply subscriptions to the update realm if any.
+                foreach (var action in subscriptions.Keys.ToArray())
+                    registerSubscription(action);
+            }
+
+            return updateRealm;
         }
     }
 
@@ -38,7 +47,7 @@ public class RealmAccess : IDisposable
     private RealmConfiguration config => new RealmConfiguration(storage.GetFullPath(FileName))
     {
         SchemaVersion = schema_version,
-        MigrationCallback = onMigrate
+        MigrationCallback = onMigrate,
     };
 
     public RealmAccess(Storage storage, string fileName = "kumi.realm", GameThread thread = null)
@@ -52,8 +61,8 @@ public class RealmAccess : IDisposable
     }
     
     private readonly Storage storage;
-    private SynchronizationContext? realmSyncContext;
-    private Dictionary<Func<Realm, IDisposable>, IDisposable> subscriptions = new Dictionary<Func<Realm, IDisposable>, IDisposable>();
+    private readonly SynchronizationContext? realmSyncContext;
+    private readonly Dictionary<Func<Realm, IDisposable>, IDisposable> subscriptions = new Dictionary<Func<Realm, IDisposable>, IDisposable>();
 
     public T Run<T>(Func<Realm, T> action)
     {

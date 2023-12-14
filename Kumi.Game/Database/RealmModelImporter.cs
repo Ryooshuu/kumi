@@ -162,6 +162,7 @@ public abstract class RealmModelImporter<TModel> : IModelImporter<TModel>
                 throw;
             }
 
+            realm.Refresh();
             return item.Detach();
         });
 
